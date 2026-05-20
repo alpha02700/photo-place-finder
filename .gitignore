@@ -1,0 +1,39 @@
+# Environment variables (API keys!)
+.env
+.env.local
+*.env
+
+# Google Cloud credentials
+credentials.json
+service-account*.json
+*.pem
+*.key
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Uploads / test images (optional - remove if you want to commit samples)
+uploads/
+temp/
