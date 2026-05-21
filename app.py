@@ -358,7 +358,7 @@ with st.sidebar:
 st.markdown("""
 <div class="hero">
   <div class="hero-title">📸 Photo Place Finder</div>
-  <p class="hero-sub">사진 한 장으로 장소를 찾고, 주변 맛집·카페·관광지까지 추천받으세요.</p>
+  <p class="hero-sub">사진 한 장으로 장소를 찾고, 주변 맛집·카페·관광지까지 추천받으세요. &nbsp;|&nbsp; AI동호회 6조</p>
 </div>
 """, unsafe_allow_html=True)
 
