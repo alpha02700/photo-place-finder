@@ -6,8 +6,9 @@ classic Places API (Nearby Search) under the hood.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import googlemaps
 
@@ -50,10 +51,10 @@ class Place:
     photo_reference: Optional[str] = None
     types: List[str] = field(default_factory=list)
     open_now: Optional[bool] = None
+    distance_m: Optional[float] = None  # metres from the photo location
 
     @property
     def google_maps_url(self) -> str:
-        """Direct Google Maps URL keyed by place_id."""
         return (
             "https://www.google.com/maps/search/?api=1"
             f"&query={self.latitude},{self.longitude}"
@@ -61,7 +62,6 @@ class Place:
         )
 
     def photo_url(self, api_key: str, max_width: int = 400) -> Optional[str]:
-        """Build a Google Place Photo URL for the first thumbnail."""
         if not self.photo_reference:
             return None
         return (
@@ -70,6 +70,24 @@ class Place:
             f"&photo_reference={self.photo_reference}"
             f"&key={api_key}"
         )
+
+    @property
+    def distance_label(self) -> str:
+        if self.distance_m is None:
+            return ""
+        if self.distance_m < 1000:
+            return f"{self.distance_m:.0f}m"
+        return f"{self.distance_m / 1000:.1f}km"
+
+
+def haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Return the great-circle distance in metres between two coordinates."""
+    R = 6_371_000
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lng2 - lng1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 class PlacesClient:
@@ -99,6 +117,26 @@ class PlacesClient:
         return results[0].get("formatted_address")
 
     # ------------------------------------------------------------------
+    # Forward geocoding (search query → lat/lng)
+    # ------------------------------------------------------------------
+    def geocode(
+        self, query: str, language: str = "ko"
+    ) -> Optional[Tuple[float, float]]:
+        """Return (lat, lng) for a text search query, or None."""
+        try:
+            results = self.gmaps.geocode(query, language=language)
+        except Exception:
+            return None
+        if not results:
+            return None
+        loc = results[0].get("geometry", {}).get("location", {})
+        lat = loc.get("lat")
+        lng = loc.get("lng")
+        if lat is None or lng is None:
+            return None
+        return float(lat), float(lng)
+
+    # ------------------------------------------------------------------
     # Nearby search
     # ------------------------------------------------------------------
     def nearby(
@@ -109,13 +147,15 @@ class PlacesClient:
         radius_m: int = 1000,
         max_results: int = 8,
         language: str = "ko",
+        sort_by: str = "prominence",  # "prominence" | "rating" | "distance"
     ) -> List[Place]:
         """
         Search Google Places within `radius_m` meters of the coordinate.
 
-        `category` must be a key from CATEGORY_TYPES.
-        Returns at most `max_results` places, sorted by Google's
-        prominence ranking (which roughly correlates with popularity).
+        `sort_by` controls client-side re-ordering after the API call:
+          - "prominence": Google's default ranking
+          - "rating": highest rated first
+          - "distance": nearest first
         """
         place_type = CATEGORY_TYPES.get(category)
         if not place_type:
@@ -145,6 +185,8 @@ class PlacesClient:
             opening = item.get("opening_hours") or {}
             open_now = opening.get("open_now")
 
+            dist = haversine_m(latitude, longitude, float(lat), float(lng))
+
             places.append(
                 Place(
                     place_id=item.get("place_id", ""),
@@ -158,7 +200,13 @@ class PlacesClient:
                     photo_reference=photo_ref,
                     types=item.get("types", []),
                     open_now=open_now,
+                    distance_m=dist,
                 )
             )
+
+        if sort_by == "rating":
+            places.sort(key=lambda p: p.rating or 0.0, reverse=True)
+        elif sort_by == "distance":
+            places.sort(key=lambda p: p.distance_m or float("inf"))
 
         return places

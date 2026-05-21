@@ -37,3 +37,7 @@ dist/
 # Uploads / test images (optional - remove if you want to commit samples)
 uploads/
 temp/
+
+# iCloud Drive duplicate files (e.g. "places_api 2.py")
+* 2.py
+* 3.py

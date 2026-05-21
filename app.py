@@ -3,9 +3,9 @@ Photo Place Finder
 ==================
 
 Upload a building / landmark photo → app figures out where it is
-(via EXIF GPS, or Google Vision Landmark Detection as a fallback) →
-shows the location on a map alongside nearby restaurants, cafes,
-and tourist attractions powered by the Google Places API.
+(via EXIF GPS, or Google Vision Landmark Detection, or Claude Vision AI
+as a final fallback) → shows the location on a map alongside nearby
+restaurants, cafes, and tourist attractions powered by the Google Places API.
 
 Run locally:
     streamlit run app.py
@@ -33,6 +33,7 @@ from utils.places_api import (
     PlacesClient,
 )
 from utils.vision_api import LandmarkResult, best_landmark
+from utils.claude_api import identify_building, ClaudeLocationGuess
 
 
 # ---------------------------------------------------------------------------
@@ -49,32 +50,28 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 # Secret / config loading
 # ---------------------------------------------------------------------------
-def _load_api_keys() -> Tuple[str, str]:
-    """
-    Load API keys from Streamlit secrets first, then fall back to
-    environment variables. This makes local development AND Streamlit
-    Cloud deployment work without changes.
-    """
-    # st.secrets behaves like a dict but raises if no secrets.toml exists,
-    # so guard with a try/except.
+def _load_api_keys() -> Tuple[str, str, str]:
+    """Load API keys from Streamlit secrets → env vars."""
     maps_key = ""
     vision_key = ""
+    anthropic_key = ""
     try:
         maps_key = st.secrets.get("GOOGLE_MAPS_API_KEY", "") or ""
         vision_key = st.secrets.get("GOOGLE_VISION_API_KEY", "") or ""
+        anthropic_key = st.secrets.get("ANTHROPIC_API_KEY", "") or ""
     except Exception:
         pass
 
     maps_key = maps_key or os.environ.get("GOOGLE_MAPS_API_KEY", "")
     vision_key = vision_key or os.environ.get("GOOGLE_VISION_API_KEY", "")
-    return maps_key, vision_key
+    anthropic_key = anthropic_key or os.environ.get("ANTHROPIC_API_KEY", "")
+    return maps_key, vision_key, anthropic_key
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 def _bytes_for_image(uploaded_file) -> bytes:
-    """Return raw image bytes from a Streamlit UploadedFile."""
     uploaded_file.seek(0)
     data = uploaded_file.read()
     uploaded_file.seek(0)
@@ -87,11 +84,16 @@ def _cached_reverse_geocode(api_key: str, lat: float, lng: float) -> Optional[st
 
 
 @st.cache_data(show_spinner=False)
+def _cached_geocode(api_key: str, query: str) -> Optional[Tuple[float, float]]:
+    return PlacesClient(api_key).geocode(query)
+
+
+@st.cache_data(show_spinner=False)
 def _cached_nearby(
-    api_key: str, lat: float, lng: float, category: str, radius_m: int
+    api_key: str, lat: float, lng: float, category: str, radius_m: int, sort_by: str
 ) -> List[Place]:
     return PlacesClient(api_key).nearby(
-        lat, lng, category=category, radius_m=radius_m
+        lat, lng, category=category, radius_m=radius_m, sort_by=sort_by
     )
 
 
@@ -102,14 +104,12 @@ def _build_map(
     places_by_category: dict,
     photo_api_key: str,
 ) -> folium.Map:
-    """Compose a folium map with the source pin + nearby place markers."""
     m = folium.Map(
         location=[center_lat, center_lng],
         zoom_start=15,
         tiles="OpenStreetMap",
     )
 
-    # Source marker (large green star-style pin).
     folium.Marker(
         location=[center_lat, center_lng],
         popup=folium.Popup(f"<b>📍 {center_label}</b>", max_width=250),
@@ -125,10 +125,11 @@ def _build_map(
                 if place.rating is not None
                 else "평점 없음"
             )
+            dist_txt = f" · {place.distance_label}" if place.distance_m is not None else ""
             popup_html = f"""
             <div style='min-width:180px'>
               <b>{place.name}</b><br>
-              {rating_txt}<br>
+              {rating_txt}{dist_txt}<br>
               <small>{place.address or ''}</small><br>
               <a href='{place.google_maps_url}' target='_blank'>
                 Google 지도에서 보기 →
@@ -138,7 +139,7 @@ def _build_map(
             folium.Marker(
                 location=[place.latitude, place.longitude],
                 popup=folium.Popup(popup_html, max_width=300),
-                tooltip=place.name,
+                tooltip=f"{place.name}{dist_txt}",
                 icon=folium.Icon(color=color, icon="info-sign"),
             ).add_to(m)
 
@@ -146,7 +147,6 @@ def _build_map(
 
 
 def _render_place_card(place: Place, photo_api_key: str) -> None:
-    """Render one place as a compact card."""
     with st.container(border=True):
         cols = st.columns([1, 2])
         photo_url = place.photo_url(photo_api_key)
@@ -163,11 +163,13 @@ def _render_place_card(place: Place, photo_api_key: str) -> None:
                 )
         with cols[1]:
             st.markdown(f"**{place.name}**")
+            meta_parts = []
             if place.rating is not None:
-                st.markdown(
-                    f"⭐ **{place.rating:.1f}** "
-                    f"({place.user_ratings_total or 0} reviews)"
-                )
+                meta_parts.append(f"⭐ **{place.rating:.1f}** ({place.user_ratings_total or 0})")
+            if place.distance_label:
+                meta_parts.append(f"📍 **{place.distance_label}**")
+            if meta_parts:
+                st.markdown("  ·  ".join(meta_parts))
             if place.address:
                 st.caption(place.address)
             if place.open_now is True:
@@ -182,7 +184,7 @@ def _render_place_card(place: Place, photo_api_key: str) -> None:
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
-maps_key, vision_key = _load_api_keys()
+maps_key, vision_key, anthropic_key = _load_api_keys()
 
 with st.sidebar:
     st.title("⚙️ 설정")
@@ -205,6 +207,15 @@ with st.sidebar:
         help="Cloud Vision API가 활성화된 키 (Maps 키와 동일해도 됨)",
     )
 
+    st.markdown("**Anthropic API Key** *(선택 — Claude AI 인식 폴백용)*")
+    anthropic_key = st.text_input(
+        "Anthropic API key",
+        value=anthropic_key,
+        type="password",
+        label_visibility="collapsed",
+        help="Vision API가 실패할 때 Claude AI로 건물을 인식합니다. 없으면 건너뜁니다.",
+    )
+
     st.divider()
 
     radius_m = st.slider(
@@ -213,6 +224,13 @@ with st.sidebar:
         max_value=3000,
         value=1000,
         step=100,
+    )
+
+    sort_by = st.radio(
+        "정렬 기준",
+        options=["prominence", "rating", "distance"],
+        format_func=lambda x: {"prominence": "🔥 인기순", "rating": "⭐ 평점순", "distance": "📍 거리순"}[x],
+        horizontal=True,
     )
 
     st.markdown("**보여줄 카테고리**")
@@ -246,7 +264,8 @@ if uploaded is None:
     st.info(
         "👆 사진을 업로드하면 시작합니다.\n\n"
         "- 📱 핸드폰 사진이면 EXIF의 GPS를 자동으로 읽어요.\n"
-        "- 🌍 GPS가 없으면 Google Vision AI가 랜드마크를 인식해요."
+        "- 🌍 GPS가 없으면 Google Vision AI가 랜드마크를 인식해요.\n"
+        "- 🤖 Vision AI도 모르면 Claude AI가 한 번 더 시도해요."
     )
     st.stop()
 
@@ -266,54 +285,81 @@ with left:
 # ---------------------------------------------------------------------------
 location_source = None
 landmark: Optional[LandmarkResult] = None
+claude_guess: Optional[ClaudeLocationGuess] = None
 coords: Optional[Tuple[float, float]] = None
 place_label = "내가 업로드한 위치"
 
 with right:
     with st.status("📍 위치 정보 분석 중...", expanded=True) as status:
-        # 1) Try EXIF first (free, instant, very accurate when present).
+        # 1) Try EXIF first.
         st.write("EXIF GPS 정보 확인 중...")
         coords = extract_gps(image)
         if coords:
             location_source = "EXIF"
             st.write(f"✅ EXIF에서 GPS를 찾았어요: {coords[0]:.5f}, {coords[1]:.5f}")
         else:
-            st.write("EXIF에 GPS가 없네요. Vision AI로 랜드마크 인식 시도...")
-            if not vision_key:
-                status.update(
-                    label="❌ Vision API 키가 없어 인식할 수 없습니다.",
-                    state="error",
-                )
-                st.error(
-                    "GPS가 없는 사진이라서 Google Vision API로 인식해야 합니다. "
-                    "사이드바에 Vision API 키를 입력해주세요."
-                )
-                st.stop()
-            try:
-                landmark = best_landmark(_bytes_for_image(uploaded), vision_key)
-            except Exception as e:
-                status.update(label="❌ Vision API 호출 실패", state="error")
-                st.error(str(e))
-                st.stop()
+            st.write("EXIF에 GPS가 없네요.")
 
-            if landmark is None:
-                status.update(
-                    label="😢 랜드마크를 인식하지 못했습니다.",
-                    state="error",
-                )
-                st.warning(
-                    "유명한 건물/랜드마크 사진이면 인식 가능성이 높아요. "
-                    "다른 사진을 시도해보세요."
-                )
-                st.stop()
+            # 2) Google Vision API.
+            if vision_key:
+                st.write("Google Vision AI로 랜드마크 인식 시도...")
+                try:
+                    landmark = best_landmark(_bytes_for_image(uploaded), vision_key)
+                except Exception as e:
+                    st.write(f"⚠️ Vision API 오류: {e}")
 
-            coords = (landmark.latitude, landmark.longitude)
-            location_source = "Vision API"
-            place_label = landmark.description
-            st.write(
-                f"✅ 인식 결과: **{landmark.description}** "
-                f"(확신도 {landmark.score:.0%})"
+            if landmark:
+                coords = (landmark.latitude, landmark.longitude)
+                location_source = "Google Vision API"
+                place_label = landmark.description
+                st.write(
+                    f"✅ Google Vision 인식: **{landmark.description}** "
+                    f"(확신도 {landmark.score:.0%})"
+                )
+            else:
+                if vision_key:
+                    st.write("Google Vision이 랜드마크를 인식하지 못했어요.")
+
+                # 3) Claude Vision fallback.
+                if anthropic_key and maps_key:
+                    st.write("🤖 Claude AI로 건물 인식 시도...")
+                    try:
+                        claude_guess = identify_building(
+                            _bytes_for_image(uploaded), anthropic_key
+                        )
+                    except Exception as e:
+                        st.write(f"⚠️ Claude API 오류: {e}")
+
+                    if claude_guess:
+                        st.write(
+                            f"🤖 Claude 추정: **{claude_guess.building_name}** "
+                            f"({claude_guess.city_hint}, 확신도: {claude_guess.confidence})"
+                        )
+                        st.caption(f"_{claude_guess.description}_")
+                        # Geocode the search query.
+                        geocoded = _cached_geocode(maps_key, claude_guess.search_query)
+                        if geocoded:
+                            coords = geocoded
+                            location_source = "Claude AI + Geocoding"
+                            place_label = claude_guess.building_name
+                            st.write(f"✅ 좌표 확인: {coords[0]:.5f}, {coords[1]:.5f}")
+                        else:
+                            st.write("⚠️ Geocoding으로 좌표를 찾지 못했어요.")
+                    else:
+                        st.write("Claude도 건물을 인식하지 못했어요.")
+                elif not anthropic_key:
+                    st.write("💡 Anthropic API 키를 사이드바에 입력하면 Claude AI가 추가로 시도합니다.")
+
+        if coords is None:
+            status.update(
+                label="😢 위치를 인식하지 못했습니다.",
+                state="error",
             )
+            st.warning(
+                "유명한 건물·랜드마크 사진이거나 GPS가 있는 핸드폰 사진을 써보세요. "
+                "Anthropic API 키가 있으면 Claude AI가 추가로 시도합니다."
+            )
+            st.stop()
 
         status.update(label="✅ 위치 확인 완료!", state="complete")
 
@@ -327,7 +373,6 @@ if not maps_key:
     st.error("Google Maps API 키가 없으면 주변 장소 검색을 할 수 없습니다.")
     st.stop()
 
-# Reverse geocode for a nice human label.
 address = _cached_reverse_geocode(maps_key, lat, lng)
 
 st.markdown("---")
@@ -362,7 +407,7 @@ with st.spinner("주변 장소 검색 중..."):
     for category in categories_to_fetch:
         try:
             places_by_category[category] = _cached_nearby(
-                maps_key, lat, lng, category, radius_m
+                maps_key, lat, lng, category, radius_m, sort_by
             )
         except Exception as e:
             st.error(f"{CATEGORY_LABELS_KO[category]} 검색 실패: {e}")
@@ -383,7 +428,6 @@ for tab, category in zip(tabs, categories_to_fetch):
         if not places:
             st.info("주변에서 찾지 못했어요. 검색 반경을 늘려보세요.")
             continue
-        # 2-column grid.
         for i in range(0, len(places), 2):
             row = st.columns(2)
             for col, place in zip(row, places[i : i + 2]):
@@ -392,7 +436,7 @@ for tab, category in zip(tabs, categories_to_fetch):
 
 st.markdown("---")
 st.caption(
-    "Powered by Google Maps Platform & Google Cloud Vision. "
+    "Powered by Google Maps Platform & Google Cloud Vision & Claude AI. "
     "Built with Streamlit · "
-    "[GitHub Repo →](https://github.com/your-username/photo-place-finder)"
+    "[GitHub →](https://github.com/alpha02700/photo-place-finder)"
 )
