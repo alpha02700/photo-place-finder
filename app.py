@@ -46,6 +46,105 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ---------------------------------------------------------------------------
+# Global CSS
+# ---------------------------------------------------------------------------
+st.markdown("""
+<style>
+/* ── Hero ── */
+.hero {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    border-radius: 20px;
+    padding: 3rem 2.5rem 2.5rem;
+    margin-bottom: 2rem;
+    position: relative;
+    overflow: hidden;
+}
+.hero::before {
+    content: "";
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 220px; height: 220px;
+    background: radial-gradient(circle, rgba(102,126,234,0.35) 0%, transparent 70%);
+    border-radius: 50%;
+}
+.hero-title {
+    font-size: 2.8rem;
+    font-weight: 800;
+    background: linear-gradient(90deg, #a78bfa, #60a5fa, #34d399);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin: 0 0 0.5rem;
+    line-height: 1.2;
+}
+.hero-sub {
+    color: rgba(255,255,255,0.75);
+    font-size: 1.1rem;
+    margin: 0;
+}
+
+/* ── Step cards ── */
+.steps {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+.step-card {
+    flex: 1;
+    background: linear-gradient(145deg, #1e293b, #0f172a);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 1.3rem 1.2rem;
+    text-align: center;
+    position: relative;
+}
+.step-card .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+.step-card .label {
+    font-weight: 700;
+    color: #e2e8f0;
+    font-size: 0.9rem;
+    margin-bottom: 0.3rem;
+}
+.step-card .desc {
+    color: rgba(255,255,255,0.45);
+    font-size: 0.78rem;
+    line-height: 1.4;
+}
+.step-card .badge {
+    position: absolute; top: -10px; left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(90deg,#7c3aed,#2563eb);
+    color: white; font-size: 0.65rem; font-weight: 700;
+    padding: 2px 10px; border-radius: 20px; white-space: nowrap;
+}
+.arrow {
+    display: flex; align-items: center; color: rgba(255,255,255,0.25);
+    font-size: 1.4rem; padding-top: 1.8rem;
+}
+
+/* ── Upload zone ── */
+.upload-zone {
+    background: linear-gradient(145deg, #1e293b, #0f172a);
+    border: 2px dashed rgba(124,58,237,0.5);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+    margin-bottom: 1rem;
+}
+.upload-zone .upload-icon { font-size: 3rem; margin-bottom: 0.5rem; }
+.upload-zone .upload-title {
+    color: #e2e8f0; font-size: 1.1rem; font-weight: 600; margin-bottom: 0.3rem;
+}
+.upload-zone .upload-hint {
+    color: rgba(255,255,255,0.4); font-size: 0.82rem;
+}
+
+/* ── Misc ── */
+[data-testid="stFileUploader"] { border: none !important; }
+</style>
+""", unsafe_allow_html=True)
+
 
 # ---------------------------------------------------------------------------
 # Secret / config loading
@@ -249,24 +348,57 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-st.title("📸 Photo Place Finder")
-st.markdown(
-    "사진 한 장으로 **장소를 찾고, 주변 맛집·카페·관광지까지** 추천받으세요."
-)
+
+# Hero
+st.markdown("""
+<div class="hero">
+  <div class="hero-title">📸 Photo Place Finder</div>
+  <p class="hero-sub">사진 한 장으로 장소를 찾고, 주변 맛집·카페·관광지까지 추천받으세요.</p>
+</div>
+""", unsafe_allow_html=True)
+
+# How it works — 3-step cards
+st.markdown("""
+<div class="steps">
+  <div class="step-card">
+    <div class="badge">STEP 1</div>
+    <div class="icon">📱</div>
+    <div class="label">GPS 자동 인식</div>
+    <div class="desc">핸드폰 사진의 EXIF GPS를<br>자동으로 읽어요</div>
+  </div>
+  <div class="arrow">›</div>
+  <div class="step-card">
+    <div class="badge">STEP 2</div>
+    <div class="icon">🔍</div>
+    <div class="label">AI 랜드마크 인식</div>
+    <div class="desc">GPS 없으면 Google Vision &<br>Claude AI가 인식해요</div>
+  </div>
+  <div class="arrow">›</div>
+  <div class="step-card">
+    <div class="badge">STEP 3</div>
+    <div class="icon">🗺️</div>
+    <div class="label">주변 장소 추천</div>
+    <div class="desc">맛집·카페·관광지를<br>지도와 카드로 보여줘요</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+# Upload zone hint
+st.markdown("""
+<div class="upload-zone">
+  <div class="upload-icon">📂</div>
+  <div class="upload-title">사진을 업로드하세요</div>
+  <div class="upload-hint">JPG · PNG · HEIC · HEIF · 파일당 최대 200MB</div>
+</div>
+""", unsafe_allow_html=True)
 
 uploaded = st.file_uploader(
     "건물 / 랜드마크 사진을 업로드하세요",
     type=["jpg", "jpeg", "png", "heic", "heif"],
-    help="스마트폰 카메라로 찍은 사진을 그대로 올리면 EXIF의 GPS를 우선 사용합니다.",
+    label_visibility="collapsed",
 )
 
 if uploaded is None:
-    st.info(
-        "👆 사진을 업로드하면 시작합니다.\n\n"
-        "- 📱 핸드폰 사진이면 EXIF의 GPS를 자동으로 읽어요.\n"
-        "- 🌍 GPS가 없으면 Google Vision AI가 랜드마크를 인식해요.\n"
-        "- 🤖 Vision AI도 모르면 Claude AI가 한 번 더 시도해요."
-    )
     st.stop()
 
 # Show the uploaded image right away.
