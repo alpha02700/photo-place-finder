@@ -78,6 +78,11 @@ st.markdown("""
     margin: 0 0 0.5rem;
     line-height: 1.2;
 }
+@media (max-width: 768px) {
+    .hero-title { font-size: 1.6rem; }
+    .hero { padding: 1.8rem 1.2rem; }
+    .hero-sub { font-size: 0.9rem; }
+}
 .hero-sub {
     color: rgba(255,255,255,0.75);
     font-size: 1.1rem;
