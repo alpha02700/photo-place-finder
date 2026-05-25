@@ -9,7 +9,6 @@ that description into precise coordinates.
 from __future__ import annotations
 
 import base64
-import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -26,15 +25,16 @@ class ClaudeLocationGuess:
     description: str         # Claude's free-text explanation (shown in UI)
 
 
-_SYSTEM_PROMPT = """You are an expert building and landmark recognition assistant.
+_SYSTEM_PROMPT = """You are an expert building and landmark recognition assistant with deep knowledge of Korean and global landmarks.
 Analyze the photo and identify the building or landmark shown.
 Reply ONLY with a JSON object (no markdown fences) with these exact keys:
-- "building_name": the name of the building/place in the local language + English if different
-- "city_hint": city and country where it is located
-- "search_query": a short geocodable string (name + city) to look it up on a map
+- "building_name": the name in the local language + English (e.g. "남대문 (Namdaemun Gate)")
+- "city_hint": city and country (e.g. "서울, 대한민국")
+- "search_query": a geocodable string combining Korean name + city (e.g. "남대문 서울" or "숭례문 서울")
 - "confidence": "high", "medium", or "low"
 - "description": one sentence describing what you see and why you identified it this way
 
+For Korean landmarks, always include the Korean name in search_query as it geocodes more accurately.
 If you genuinely cannot identify the location at all, set confidence to "low" and
 provide your best guess anyway — never leave fields empty."""
 
@@ -42,7 +42,7 @@ provide your best guess anyway — never leave fields empty."""
 def identify_building(
     image_bytes: bytes,
     api_key: str,
-    model: str = "claude-haiku-4-5-20251001",
+    model: str = "claude-sonnet-4-6",
     timeout: int = 30,
 ) -> Optional[ClaudeLocationGuess]:
     """

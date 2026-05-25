@@ -40,8 +40,8 @@ from utils.claude_api import identify_building, ClaudeLocationGuess
 # App configuration
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="📸 Photo Place Finder",
-    page_icon="📸",
+    page_title="LOCA — AI 장소 탐색기",
+    page_icon="📍",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -357,8 +357,8 @@ with st.sidebar:
 # Hero
 st.markdown("""
 <div class="hero">
-  <div class="hero-title">📸 Photo Place Finder</div>
-  <p class="hero-sub">사진 한 장으로 장소를 찾고, 주변 맛집·카페·관광지까지 추천받으세요. &nbsp;|&nbsp; AI동호회 6조</p>
+  <div class="hero-title">📍 LOCA</div>
+  <p class="hero-sub">사진 한 장이면 충분해요 — AI가 장소를 찾고 주변 맛집·카페·관광지까지 추천해드려요. &nbsp;|&nbsp; AI동호회 6조</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -367,23 +367,23 @@ st.markdown("""
 <div class="steps">
   <div class="step-card">
     <div class="badge">STEP 1</div>
-    <div class="icon">📱</div>
-    <div class="label">GPS 자동 인식</div>
-    <div class="desc">핸드폰 사진의 EXIF GPS를<br>자동으로 읽어요</div>
+    <div class="icon">🔍</div>
+    <div class="label">AI 랜드마크 인식</div>
+    <div class="desc">Google Vision AI로<br>건물·랜드마크를 먼저 인식해요</div>
   </div>
   <div class="arrow">›</div>
   <div class="step-card">
     <div class="badge">STEP 2</div>
-    <div class="icon">🔍</div>
-    <div class="label">AI 랜드마크 인식</div>
-    <div class="desc">GPS 없으면 Google Vision &<br>Claude AI가 인식해요</div>
+    <div class="icon">🤖</div>
+    <div class="label">Claude AI 폴백</div>
+    <div class="desc">Vision 실패 시<br>Anthropic Claude가 인식해요</div>
   </div>
   <div class="arrow">›</div>
   <div class="step-card">
     <div class="badge">STEP 3</div>
-    <div class="icon">🗺️</div>
-    <div class="label">주변 장소 추천</div>
-    <div class="desc">맛집·카페·관광지를<br>지도와 카드로 보여줘요</div>
+    <div class="icon">📱</div>
+    <div class="label">GPS 자동 인식</div>
+    <div class="desc">위 두 방법 실패 시<br>EXIF GPS로 위치를 확인해요</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -428,64 +428,66 @@ place_label = "내가 업로드한 위치"
 
 with right:
     with st.status("📍 위치 정보 분석 중...", expanded=True) as status:
-        # 1) Try EXIF first.
-        st.write("EXIF GPS 정보 확인 중...")
-        coords = extract_gps(image)
-        if coords:
-            location_source = "EXIF"
-            st.write(f"✅ EXIF에서 GPS를 찾았어요: {coords[0]:.5f}, {coords[1]:.5f}")
+        # 1) Google Vision API (최우선).
+        if vision_key:
+            st.write("🔍 Google Vision AI로 랜드마크 인식 시도...")
+            try:
+                landmark = best_landmark(_bytes_for_image(uploaded), vision_key)
+            except Exception as e:
+                st.write(f"⚠️ Vision API 오류: {e}")
         else:
-            st.write("EXIF에 GPS가 없네요.")
+            st.write("💡 Google Vision API 키가 없어요.")
 
-            # 2) Google Vision API.
+        if landmark:
+            coords = (landmark.latitude, landmark.longitude)
+            location_source = "Google Vision API"
+            place_label = landmark.description
+            st.write(
+                f"✅ Google Vision 인식: **{landmark.description}** "
+                f"(확신도 {landmark.score:.0%})"
+            )
+        else:
             if vision_key:
-                st.write("Google Vision AI로 랜드마크 인식 시도...")
+                st.write("Google Vision이 랜드마크를 인식하지 못했어요.")
+
+            # 2) Claude Vision fallback.
+            if anthropic_key and maps_key:
+                st.write("🤖 Claude AI로 건물 인식 시도...")
                 try:
-                    landmark = best_landmark(_bytes_for_image(uploaded), vision_key)
+                    claude_guess = identify_building(
+                        _bytes_for_image(uploaded), anthropic_key
+                    )
                 except Exception as e:
-                    st.write(f"⚠️ Vision API 오류: {e}")
+                    st.write(f"⚠️ Claude API 오류: {e}")
 
-            if landmark:
-                coords = (landmark.latitude, landmark.longitude)
-                location_source = "Google Vision API"
-                place_label = landmark.description
-                st.write(
-                    f"✅ Google Vision 인식: **{landmark.description}** "
-                    f"(확신도 {landmark.score:.0%})"
-                )
-            else:
-                if vision_key:
-                    st.write("Google Vision이 랜드마크를 인식하지 못했어요.")
-
-                # 3) Claude Vision fallback.
-                if anthropic_key and maps_key:
-                    st.write("🤖 Claude AI로 건물 인식 시도...")
-                    try:
-                        claude_guess = identify_building(
-                            _bytes_for_image(uploaded), anthropic_key
-                        )
-                    except Exception as e:
-                        st.write(f"⚠️ Claude API 오류: {e}")
-
-                    if claude_guess:
-                        st.write(
-                            f"🤖 Claude 추정: **{claude_guess.building_name}** "
-                            f"({claude_guess.city_hint}, 확신도: {claude_guess.confidence})"
-                        )
-                        st.caption(f"_{claude_guess.description}_")
-                        # Geocode the search query.
-                        geocoded = _cached_geocode(maps_key, claude_guess.search_query)
-                        if geocoded:
-                            coords = geocoded
-                            location_source = "Claude AI + Geocoding"
-                            place_label = claude_guess.building_name
-                            st.write(f"✅ 좌표 확인: {coords[0]:.5f}, {coords[1]:.5f}")
-                        else:
-                            st.write("⚠️ Geocoding으로 좌표를 찾지 못했어요.")
+                if claude_guess:
+                    st.write(
+                        f"🤖 Claude 추정: **{claude_guess.building_name}** "
+                        f"({claude_guess.city_hint}, 확신도: {claude_guess.confidence})"
+                    )
+                    st.caption(f"_{claude_guess.description}_")
+                    geocoded = _cached_geocode(maps_key, claude_guess.search_query)
+                    if geocoded:
+                        coords = geocoded
+                        location_source = "Claude AI + Geocoding"
+                        place_label = claude_guess.building_name
+                        st.write(f"✅ 좌표 확인: {coords[0]:.5f}, {coords[1]:.5f}")
                     else:
-                        st.write("Claude도 건물을 인식하지 못했어요.")
-                elif not anthropic_key:
-                    st.write("💡 Anthropic API 키를 사이드바에 입력하면 Claude AI가 추가로 시도합니다.")
+                        st.write("⚠️ Geocoding으로 좌표를 찾지 못했어요.")
+                else:
+                    st.write("Claude도 건물을 인식하지 못했어요.")
+            elif not anthropic_key:
+                st.write("💡 Anthropic API 키를 사이드바에 입력하면 Claude AI가 추가로 시도합니다.")
+
+            # 3) EXIF GPS (최후 수단).
+            if coords is None:
+                st.write("📱 사진 EXIF GPS 정보 확인 중...")
+                coords = extract_gps(image)
+                if coords:
+                    location_source = "GPS (EXIF)"
+                    st.write(f"✅ EXIF에서 GPS를 찾았어요: {coords[0]:.5f}, {coords[1]:.5f}")
+                else:
+                    st.write("EXIF에 GPS가 없네요.")
 
         if coords is None:
             status.update(
