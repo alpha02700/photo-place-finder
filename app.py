@@ -520,7 +520,35 @@ with header_col1:
     st.subheader(f"📍 {place_label}")
     if address:
         st.caption(address)
-    st.caption(f"좌표: `{lat:.5f}, {lng:.5f}` · 출처: **{location_source}**")
+    st.caption(f"좌표: `{lat:.5f}, {lng:.5f}`")
+
+    # 인식 방법 배지
+    if location_source == "Google Vision API":
+        method_color = "#2563eb"
+        method_icon = "🔍"
+        method_label = "Google Vision AI"
+        method_detail = f"확신도 {landmark.score:.0%}" if landmark else ""
+    elif location_source == "Claude AI + Geocoding":
+        method_color = "#7c3aed"
+        method_icon = "🤖"
+        method_label = "Claude AI"
+        method_detail = f"확신도: {claude_guess.confidence}" if claude_guess else ""
+    else:
+        method_color = "#059669"
+        method_icon = "📱"
+        method_label = "GPS (EXIF)"
+        method_detail = "사진 위치 정보"
+
+    st.markdown(
+        f"""<div style="display:inline-flex;align-items:center;gap:0.5rem;
+        background:{method_color}22;border:1px solid {method_color}66;
+        border-radius:20px;padding:0.3rem 0.9rem;margin-top:0.3rem;">
+        <span style="font-size:1rem">{method_icon}</span>
+        <span style="color:{method_color};font-weight:700;font-size:0.85rem">{method_label}</span>
+        <span style="color:{method_color}99;font-size:0.8rem">· {method_detail}</span>
+        </div>""",
+        unsafe_allow_html=True,
+    )
 with header_col2:
     st.link_button(
         "Google 지도에서 열기",
